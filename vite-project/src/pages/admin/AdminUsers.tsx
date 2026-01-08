@@ -4,23 +4,29 @@ import axios from 'axios';
 import type { User, Role } from '../../types';
 import AdminTable from '../../components/AdminTable';
 import Modal from '../../components/Modal';
-import { Button, Card, Badge, Toast } from 'flowbite-react';
+import { Button, Card, Badge, Toast, Select } from 'flowbite-react';
 import { FaCheckCircle } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../auth/AuthContext';
 
 export default function AdminUsers() {
   const [items, setItems] = useState<User[]>([]);
   const nav = useNavigate();
+  const { user: me } = useAuth();
   const [toasts, setToasts] = useState<{ id: number; type: 'success' | 'failure'; message: string }[]>([]);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
       const res = await http.get('/admin/users');
       setItems(res.data);
     } catch (e) {
-      if (axios.isAxiosError(e) && e.response?.status === 401) nav('/login');
+      if (axios.isAxiosError(e)) {
+        if (e.response?.status === 401) nav('/login');
+        if (e.response?.status === 403) nav('/');
+      }
     }
   }, [nav]);
 
@@ -29,11 +35,19 @@ export default function AdminUsers() {
   }, [load]);
 
   async function setRole(id: number, role: Role) {
+    setUpdatingId(id);
     try {
       await http.patch(`/admin/users/${id}/role`, { role });
+      addToast('success', 'Rol güncellendi');
       await load();
     } catch (e) {
-      if (axios.isAxiosError(e) && e.response?.status === 401) nav('/login');
+      addToast('failure', axios.isAxiosError(e) ? (e.response?.data?.message ?? 'Güncelleme başarısız') : 'Güncelleme başarısız');
+      if (axios.isAxiosError(e)) {
+        if (e.response?.status === 401) nav('/login');
+        if (e.response?.status === 403) nav('/');
+      }
+    } finally {
+      setUpdatingId(null);
     }
   }
 
@@ -74,11 +88,19 @@ export default function AdminUsers() {
     <Badge key={`role-${u.id}`} color={u.role === 'ADMIN' ? 'success' : 'gray'}>{u.role === 'ADMIN' ? 'Admin' : 'Müşteri'}</Badge>,
     (
       <div className="flex gap-2" key={`act-${u.id}`}>
-        {u.role === 'ADMIN' ? (
-          <Button size="xs" color="warning" onClick={() => setRole(u.id, 'CUSTOMER')}>Adminliği Kaldır</Button>
-        ) : (
-          <Button size="xs" color="blue" onClick={() => setRole(u.id, 'ADMIN')}>Admin Yap</Button>
-        )}
+        <Select
+          value={u.role}
+          sizing="sm"
+          disabled={updatingId === u.id}
+          onChange={(e) => {
+            const next = e.target.value as Role;
+            if (next === 'CUSTOMER' && me?.id === u.id && u.role === 'ADMIN') return;
+            void setRole(u.id, next);
+          }}
+        >
+          <option value="ADMIN">Admin</option>
+          <option value="CUSTOMER" disabled={me?.id === u.id && u.role === 'ADMIN'}>Müşteri</option>
+        </Select>
         <Button size="xs" color="failure" onClick={() => openConfirm(u.id)}>Sil</Button>
       </div>
     ),
